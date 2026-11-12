@@ -1,0 +1,56 @@
+# Minimal Supabase-compatible stack for local development and tests:
+# Postgres (Supabase image) + GoTrue (Supabase Auth) + PostgREST + Mailpit.
+# The API gateway (dev-stack/gateway.mjs) runs on the host and exposes
+# /auth/v1 and /rest/v1 on one port, like a hosted Supabase project.
+name: ivan-os
+services:
+  db:
+    image: supabase/postgres:15.8.1.060
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${DB_PORT}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  rest:
+    image: postgrest/postgrest:v12.2.12
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "127.0.0.1:${REST_PORT}:3000"
+
+  mail:
+    image: axllent/mailpit:latest
+    ports:
+      - "127.0.0.1:${MAIL_UI_PORT}:8025"
+      - "127.0.0.1:${MAIL_SMTP_PORT}:1025"
+
+  # Skipped when GOTRUE_BIN points at a locally built auth binary (see up.sh).
+  auth:
+    image: supabase/gotrue:v2.177.0
+    profiles: ["auth-image"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: auth.env
+    environment:
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SMTP_HOST: mail
+      GOTRUE_SMTP_PORT: "1025"
+    ports:
+      - "127.0.0.1:${AUTH_PORT}:9999"
+
+volumes:
+  db-data:
